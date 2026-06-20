@@ -12,6 +12,7 @@ import path from "node:path";
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion, type proto } from "baileys";
 import qrcode from "qrcode-terminal";
 import type { Agent, ContentBlock } from "@vibearound/plugin-channel-sdk";
+import { extractErrorMessage } from "@vibearound/plugin-channel-sdk";
 import type { AgentStreamHandler } from "./agent-stream.js";
 
 type LogFn = (level: string, msg: string) => void;
@@ -205,7 +206,7 @@ export class WhatsAppBot {
       this.log("info", `prompt done chat=${chatId} stopReason=${response.stopReason}`);
       await this.streamHandler?.onTurnEnd(chatId);
     } catch (error: unknown) {
-      const errMsg = error instanceof Error ? error.message : String(error);
+      const errMsg = extractErrorMessage(error);
       this.log("error", `prompt failed chat=${chatId}: ${errMsg}`);
       await this.streamHandler?.onTurnError(chatId, errMsg);
     }
