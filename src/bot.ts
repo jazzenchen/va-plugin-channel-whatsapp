@@ -9,13 +9,22 @@
  */
 
 import path from "node:path";
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion, type proto } from "baileys";
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion, isJidGroup, type proto } from "baileys";
 import qrcode from "qrcode-terminal";
 import type { Agent, ContentBlock } from "@vibearound/plugin-channel-sdk";
 import { extractErrorMessage } from "@vibearound/plugin-channel-sdk";
 import type { AgentStreamHandler } from "./agent-stream.js";
+import { shouldHandleWhatsAppInbound } from "./inbound-policy.js";
 
 type LogFn = (level: string, msg: string) => void;
+
+function messageContextInfo(message: proto.IMessage | null | undefined): proto.IContextInfo | null | undefined {
+  return message?.extendedTextMessage?.contextInfo
+    ?? message?.imageMessage?.contextInfo
+    ?? message?.documentMessage?.contextInfo
+    ?? message?.audioMessage?.contextInfo
+    ?? message?.videoMessage?.contextInfo;
+}
 
 export class WhatsAppBot {
   private socket: ReturnType<typeof makeWASocket> | null = null;
@@ -160,6 +169,9 @@ export class WhatsAppBot {
 
     const text = msg.message?.conversation
       ?? msg.message?.extendedTextMessage?.text
+      ?? msg.message?.imageMessage?.caption
+      ?? msg.message?.documentMessage?.caption
+      ?? msg.message?.videoMessage?.caption
       ?? "";
 
     const hasMedia = !!(
@@ -170,6 +182,17 @@ export class WhatsAppBot {
     );
 
     if (!text && !hasMedia) return;
+
+    const contextInfo = messageContextInfo(msg.message);
+    if (!shouldHandleWhatsAppInbound({
+      isGroup: isJidGroup(jid) === true,
+      text,
+      mentionedJids: contextInfo?.mentionedJid ?? [],
+      botJid: this.socket?.user?.id,
+    })) {
+      this.log("debug", `group message ignored without bot mention chat=${jid}`);
+      return;
+    }
 
     const chatId = jid;
     this.log("debug", `message chat=${chatId} text=${text.slice(0, 80)}`);
