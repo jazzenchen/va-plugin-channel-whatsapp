@@ -187,7 +187,11 @@ export class WhatsAppBot {
     if (!shouldHandleWhatsAppInbound({
       isGroup: isJidGroup(jid) === true,
       mentionedJids: contextInfo?.mentionedJid ?? [],
-      botJid: this.socket?.user?.id,
+      botJids: [
+        this.socket?.user?.id,
+        this.socket?.user?.lid,
+        this.socket?.user?.phoneNumber,
+      ].filter((identity): identity is string => Boolean(identity)),
     })) {
       this.log("debug", `group message ignored without bot mention chat=${jid}`);
       return;
