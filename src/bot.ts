@@ -186,7 +186,6 @@ export class WhatsAppBot {
     const contextInfo = messageContextInfo(msg.message);
     if (!shouldHandleWhatsAppInbound({
       isGroup: isJidGroup(jid) === true,
-      text,
       mentionedJids: contextInfo?.mentionedJid ?? [],
       botJid: this.socket?.user?.id,
     })) {
