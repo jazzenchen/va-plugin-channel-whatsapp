@@ -17,8 +17,8 @@ import { AgentStreamHandler } from "./agent-stream.js";
 runChannelPlugin({
   name: "vibearound-whatsapp",
   version: "0.1.0",
-  createBot: ({ agent, log, cacheDir }) =>
-    new WhatsAppBot(agent, log, cacheDir),
+  createBot: ({ agent, log, cacheDir, channelInstanceId, actorId }) =>
+    new WhatsAppBot(agent, log, cacheDir, channelInstanceId, actorId),
   afterCreate: async (bot, log) => {
     const botInfo = await bot.probe();
     log("info", `bot identity: ${botInfo.name} (${botInfo.id})`);

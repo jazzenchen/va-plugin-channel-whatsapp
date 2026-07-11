@@ -11,8 +11,13 @@
 import path from "node:path";
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion, isJidGroup, type proto } from "baileys";
 import qrcode from "qrcode-terminal";
-import type { Agent, ContentBlock } from "@vibearound/plugin-channel-sdk";
-import { extractErrorMessage } from "@vibearound/plugin-channel-sdk";
+import type { Agent, ChannelInboundContext, ContentBlock } from "@vibearound/plugin-channel-sdk";
+import {
+  cancelChannelPrompt,
+  extractErrorMessage,
+  isChannelStopCommand,
+  sendChannelPrompt,
+} from "@vibearound/plugin-channel-sdk";
 import type { AgentStreamHandler } from "./agent-stream.js";
 import { shouldHandleWhatsAppInbound } from "./inbound-policy.js";
 
@@ -32,6 +37,8 @@ export class WhatsAppBot {
   private log: LogFn;
   private cacheDir: string;
   private authDir: string;
+  private channelInstanceId: string;
+  private actorId: string;
   private streamHandler: AgentStreamHandler | null = null;
   private stopped = false;
   private retryCount = 0;
@@ -42,11 +49,19 @@ export class WhatsAppBot {
     return this.socket?.user != null;
   }
 
-  constructor(agent: Agent, log: LogFn, cacheDir: string) {
+  constructor(
+    agent: Agent,
+    log: LogFn,
+    cacheDir: string,
+    channelInstanceId: string,
+    actorId: string,
+  ) {
     this.agent = agent;
     this.log = log;
     this.cacheDir = cacheDir;
     this.authDir = path.join(cacheDir, "whatsapp-auth");
+    this.channelInstanceId = channelInstanceId;
+    this.actorId = actorId;
   }
 
   setStreamHandler(handler: AgentStreamHandler): void {
@@ -198,7 +213,22 @@ export class WhatsAppBot {
     }
 
     const chatId = jid;
+    const isGroup = isJidGroup(jid) === true;
+    const inboundContext = {
+      channelInstanceId: this.channelInstanceId,
+      actorId: this.actorId,
+      chatId,
+      senderId: key.participant ?? undefined,
+      platformMessageId: key.id ?? undefined,
+      scope: isGroup ? "group" : "dm",
+      addressedBy: isGroup ? "mention" : "dm",
+    } satisfies ChannelInboundContext;
     this.log("debug", `message chat=${chatId} text=${text.slice(0, 80)}`);
+
+    if (text && isChannelStopCommand(text)) {
+      await cancelChannelPrompt(this.agent, { context: inboundContext });
+      return;
+    }
 
     const contentBlocks: ContentBlock[] = [];
 
@@ -225,10 +255,11 @@ export class WhatsAppBot {
     this.streamHandler?.onPromptSent(chatId);
 
     try {
-      const response = await this.agent.prompt({
-        sessionId: chatId,
+      const response = await sendChannelPrompt(this.agent, {
+        context: inboundContext,
         prompt: contentBlocks,
       });
+      if (!response) return;
       this.log("info", `prompt done chat=${chatId} stopReason=${response.stopReason}`);
       await this.streamHandler?.onTurnEnd(chatId);
     } catch (error: unknown) {
