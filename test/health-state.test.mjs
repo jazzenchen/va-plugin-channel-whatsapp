@@ -3,10 +3,10 @@ import test from "node:test";
 
 import { WhatsAppBot } from "../dist/bot.js";
 
-test("health requires both authentication and an open WebSocket", () => {
-  const bot = Object.create(WhatsAppBot.prototype);
+test("health stays false before start and follows the opened WebSocket", () => {
+  const bot = new WhatsAppBot({}, () => {}, "/tmp", "whatsapp:bot", "whatsapp:bot");
 
-  bot.socket = null;
+  // Construction is synchronous and does not wait for post-start identity.
   assert.equal(bot.isConnected(), false);
 
   bot.socket = { user: { id: "bot" }, ws: { isOpen: false } };

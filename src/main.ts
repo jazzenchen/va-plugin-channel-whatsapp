@@ -19,10 +19,6 @@ runChannelPlugin({
   version: "0.1.0",
   createBot: ({ agent, log, cacheDir, channelInstanceId, actorId }) =>
     new WhatsAppBot(agent, log, cacheDir, channelInstanceId, actorId),
-  afterCreate: async (bot, log) => {
-    const botInfo = await bot.probe();
-    log("info", `bot identity: ${botInfo.name} (${botInfo.id})`);
-  },
   createRenderer: (bot, log, verbose) =>
     new AgentStreamHandler(bot, log, verbose),
   // Heartbeat health check — authenticated and receiving over Baileys WS.

@@ -112,7 +112,11 @@ export class WhatsAppBot {
           setTimeout(() => this.start(), delay);
         }
       } else if (connection === "open") {
-        this.log("info", "connected to WhatsApp");
+        const user = socket.user;
+        this.log(
+          "info",
+          `connected to WhatsApp as ${user?.name ?? "WhatsApp Bot"} (${user?.id ?? "unknown"})`,
+        );
         this.retryCount = 0; // reset on successful connection
       }
     });
@@ -127,31 +131,6 @@ export class WhatsAppBot {
         this.handleMessage(msg);
       }
     });
-  }
-
-  /** Probe bot identity (returns the authenticated JID). */
-  async probe(): Promise<{ id: string; name: string }> {
-    // Wait for connection
-    await new Promise<void>((resolve) => {
-      if (this.socket?.user) {
-        resolve();
-        return;
-      }
-      const check = setInterval(() => {
-        if (this.socket?.user) {
-          clearInterval(check);
-          resolve();
-        }
-      }, 500);
-      // Timeout after 2 minutes (QR scan may take time)
-      setTimeout(() => { clearInterval(check); resolve(); }, 120_000);
-    });
-
-    const user = this.socket?.user;
-    return {
-      id: user?.id ?? "unknown",
-      name: user?.name ?? "WhatsApp Bot",
-    };
   }
 
   /** Stop the bot. */
