@@ -19,7 +19,7 @@ import {
   sendChannelPrompt,
 } from "@vibearound/plugin-channel-sdk";
 import type { AgentStreamHandler } from "./agent-stream.js";
-import { shouldHandleWhatsAppInbound } from "./inbound-policy.js";
+import { normalizeWhatsAppPromptText, shouldHandleWhatsAppInbound } from "./inbound-policy.js";
 
 type LogFn = (level: string, msg: string) => void;
 
@@ -182,7 +182,7 @@ export class WhatsAppBot {
     const jid = key.remoteJid;
     if (!jid) return;
 
-    const text = msg.message?.conversation
+    const rawText = msg.message?.conversation
       ?? msg.message?.extendedTextMessage?.text
       ?? msg.message?.imageMessage?.caption
       ?? msg.message?.documentMessage?.caption
@@ -196,21 +196,27 @@ export class WhatsAppBot {
       || msg.message?.videoMessage
     );
 
-    if (!text && !hasMedia) return;
+    if (!rawText && !hasMedia) return;
 
     const contextInfo = messageContextInfo(msg.message);
+    const botJids = [
+      this.socket?.user?.id,
+      this.socket?.user?.lid,
+      this.socket?.user?.phoneNumber,
+    ].filter((identity): identity is string => Boolean(identity));
     if (!shouldHandleWhatsAppInbound({
       isGroup: isJidGroup(jid) === true,
       mentionedJids: contextInfo?.mentionedJid ?? [],
-      botJids: [
-        this.socket?.user?.id,
-        this.socket?.user?.lid,
-        this.socket?.user?.phoneNumber,
-      ].filter((identity): identity is string => Boolean(identity)),
+      botJids,
     })) {
       this.log("debug", `group message ignored without bot mention chat=${jid}`);
       return;
     }
+    const text = normalizeWhatsAppPromptText({
+      text: rawText,
+      mentionedJids: contextInfo?.mentionedJid ?? [],
+      botJids,
+    });
 
     const chatId = jid;
     const isGroup = isJidGroup(jid) === true;

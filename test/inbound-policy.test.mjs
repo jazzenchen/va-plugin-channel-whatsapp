@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { shouldHandleWhatsAppInbound } from "../dist/inbound-policy.js";
+import {
+  normalizeWhatsAppPromptText,
+  shouldHandleWhatsAppInbound,
+} from "../dist/inbound-policy.js";
 
 const botJids = [
   "15551234567:4@s.whatsapp.net",
@@ -40,4 +43,17 @@ test("group mentions accept either the bot PN or LID identity", () => {
     mentionedJids: ["873421987654321@lid"],
     botJids,
   }), true);
+});
+
+test("bot addressing is removed before command parsing", () => {
+  assert.equal(normalizeWhatsAppPromptText({
+    text: "@15551234567 va stop",
+    mentionedJids: ["15551234567@s.whatsapp.net"],
+    botJids,
+  }), "va stop");
+  assert.equal(normalizeWhatsAppPromptText({
+    text: "@15557654321 keep this mention",
+    mentionedJids: ["15557654321@s.whatsapp.net"],
+    botJids,
+  }), "@15557654321 keep this mention");
 });
