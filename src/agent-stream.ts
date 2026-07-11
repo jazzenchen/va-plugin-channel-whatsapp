@@ -5,6 +5,7 @@
 import {
   BlockRenderer,
   type BlockKind,
+  type ChannelTarget,
   type VerboseConfig,
 } from "@vibearound/plugin-channel-sdk";
 import type { WhatsAppBot } from "./bot.js";
@@ -25,13 +26,13 @@ export class AgentStreamHandler extends BlockRenderer<string> {
     this.log = log;
   }
 
-  protected async sendText(chatId: string, text: string): Promise<void> {
-    await this.bot.sendMessage(chatId, text);
+  protected async sendText(target: ChannelTarget, text: string): Promise<void> {
+    await this.bot.sendMessage(target.chatId, text);
   }
 
-  protected async sendBlock(chatId: string, _kind: BlockKind, content: string): Promise<string | null> {
+  protected async sendBlock(target: ChannelTarget, _kind: BlockKind, content: string): Promise<string | null> {
     try {
-      await this.bot.sendMessage(chatId, content);
+      await this.bot.sendMessage(target.chatId, content);
     } catch (e) {
       this.log("error", `sendBlock failed: ${e}`);
     }

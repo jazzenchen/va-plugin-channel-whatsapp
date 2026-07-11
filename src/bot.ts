@@ -14,6 +14,7 @@ import qrcode from "qrcode-terminal";
 import type { Agent, ChannelInboundContext, ContentBlock } from "@vibearound/plugin-channel-sdk";
 import {
   cancelChannelPrompt,
+  channelTargetFromInboundContext,
   extractErrorMessage,
   isChannelStopCommand,
   sendChannelPrompt,
@@ -229,6 +230,7 @@ export class WhatsAppBot {
       scope: isGroup ? "group" : "dm",
       addressedBy: isGroup ? "mention" : "dm",
     } satisfies ChannelInboundContext;
+    const target = channelTargetFromInboundContext(inboundContext);
     this.log("debug", `message chat=${chatId} text=${text.slice(0, 80)}`);
 
     if (text && isChannelStopCommand(text)) {
@@ -254,24 +256,27 @@ export class WhatsAppBot {
 
     if (contentBlocks.length === 0) return;
 
-    if (text && this.streamHandler?.consumePendingText(chatId, text)) {
+    if (text && this.streamHandler?.consumePendingText(target, text)) {
       return;
     }
 
-    this.streamHandler?.onPromptSent(chatId);
+    this.streamHandler?.onPromptSent(target);
 
     try {
       const response = await sendChannelPrompt(this.agent, {
         context: inboundContext,
         prompt: contentBlocks,
       });
-      if (!response) return;
+      if (!response) {
+        await this.streamHandler?.onTurnEnd(target);
+        return;
+      }
       this.log("info", `prompt done chat=${chatId} stopReason=${response.stopReason}`);
-      await this.streamHandler?.onTurnEnd(chatId);
+      await this.streamHandler?.onTurnEnd(target);
     } catch (error: unknown) {
       const errMsg = extractErrorMessage(error);
       this.log("error", `prompt failed chat=${chatId}: ${errMsg}`);
-      await this.streamHandler?.onTurnError(chatId, errMsg);
+      await this.streamHandler?.onTurnError(target, errMsg);
     }
   }
 }
