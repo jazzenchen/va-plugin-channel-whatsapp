@@ -13,7 +13,7 @@
   },
   "dependencies": {
     "@vibearound/plugin-channel-sdk": "file:../va-plugin-channel-sdk",
-    "baileys": "^7.0.0-rc.9",
+    "baileys": "^7.0.0-rc13",
     "qrcode-terminal": "^0.12.0"
   },
   "devDependencies": {
