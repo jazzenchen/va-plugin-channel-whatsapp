@@ -25,6 +25,6 @@ runChannelPlugin({
   },
   createRenderer: (bot, log, verbose) =>
     new AgentStreamHandler(bot, log, verbose),
-  // Heartbeat health check — Baileys socket authenticated (user set).
+  // Heartbeat health check — authenticated and receiving over Baileys WS.
   healthCheck: async (bot) => bot.isConnected(),
 });

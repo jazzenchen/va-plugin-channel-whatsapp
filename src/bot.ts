@@ -44,10 +44,9 @@ export class WhatsAppBot {
   private stopped = false;
   private retryCount = 0;
 
-  /** Heartbeat check — socket present, user authenticated. Baileys clears
-   *  `.user` on forced logout / session reset. */
+  /** Heartbeat check — authenticated and the inbound WebSocket is open. */
   public isConnected(): boolean {
-    return this.socket?.user != null;
+    return this.socket?.user != null && this.socket.ws.isOpen;
   }
 
   constructor(
