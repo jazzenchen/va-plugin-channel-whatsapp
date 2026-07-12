@@ -1,6 +1,6 @@
 {
   "name": "@vibearound/plugin-channel-whatsapp",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "type": "module",
   "description": "VibeAround WhatsApp channel plugin via Baileys (stdio JSON-RPC)",
