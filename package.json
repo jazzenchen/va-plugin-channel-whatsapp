@@ -1,18 +1,19 @@
 {
   "name": "@vibearound/plugin-channel-whatsapp",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "type": "module",
   "description": "VibeAround WhatsApp channel plugin via Baileys (stdio JSON-RPC)",
   "main": "dist/main.js",
   "scripts": {
     "build": "tsc",
+    "test": "npm run build && node --test test/*.test.mjs",
     "dev": "tsc --watch",
     "start": "node dist/main.js"
   },
   "dependencies": {
-    "@vibearound/plugin-channel-sdk": "^0.6.1",
-    "baileys": "^7.0.0-rc.9",
+    "@vibearound/plugin-channel-sdk": "^0.6.2",
+    "baileys": "^7.0.0-rc13",
     "qrcode-terminal": "^0.12.0"
   },
   "devDependencies": {

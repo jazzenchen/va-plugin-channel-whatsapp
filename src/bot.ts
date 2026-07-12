@@ -9,13 +9,28 @@
  */
 
 import path from "node:path";
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion, type proto } from "baileys";
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion, isJidGroup, type proto } from "baileys";
 import qrcode from "qrcode-terminal";
-import type { Agent, ContentBlock } from "@vibearound/plugin-channel-sdk";
-import { extractErrorMessage } from "@vibearound/plugin-channel-sdk";
+import type { Agent, ChannelInboundContext, ContentBlock } from "@vibearound/plugin-channel-sdk";
+import {
+  cancelChannelPrompt,
+  channelTargetFromInboundContext,
+  extractErrorMessage,
+  isChannelStopCommand,
+  sendChannelPrompt,
+} from "@vibearound/plugin-channel-sdk";
 import type { AgentStreamHandler } from "./agent-stream.js";
+import { normalizeWhatsAppPromptText, shouldHandleWhatsAppInbound } from "./inbound-policy.js";
 
 type LogFn = (level: string, msg: string) => void;
+
+function messageContextInfo(message: proto.IMessage | null | undefined): proto.IContextInfo | null | undefined {
+  return message?.extendedTextMessage?.contextInfo
+    ?? message?.imageMessage?.contextInfo
+    ?? message?.documentMessage?.contextInfo
+    ?? message?.audioMessage?.contextInfo
+    ?? message?.videoMessage?.contextInfo;
+}
 
 export class WhatsAppBot {
   private socket: ReturnType<typeof makeWASocket> | null = null;
@@ -23,21 +38,30 @@ export class WhatsAppBot {
   private log: LogFn;
   private cacheDir: string;
   private authDir: string;
+  private channelInstanceId: string;
+  private actorId: string;
   private streamHandler: AgentStreamHandler | null = null;
   private stopped = false;
   private retryCount = 0;
 
-  /** Heartbeat check — socket present, user authenticated. Baileys clears
-   *  `.user` on forced logout / session reset. */
+  /** Heartbeat check — authenticated and the inbound WebSocket is open. */
   public isConnected(): boolean {
-    return this.socket?.user != null;
+    return this.socket?.user != null && this.socket.ws.isOpen;
   }
 
-  constructor(agent: Agent, log: LogFn, cacheDir: string) {
+  constructor(
+    agent: Agent,
+    log: LogFn,
+    cacheDir: string,
+    channelInstanceId: string,
+    actorId: string,
+  ) {
     this.agent = agent;
     this.log = log;
     this.cacheDir = cacheDir;
     this.authDir = path.join(cacheDir, "whatsapp-auth");
+    this.channelInstanceId = channelInstanceId;
+    this.actorId = actorId;
   }
 
   setStreamHandler(handler: AgentStreamHandler): void {
@@ -88,7 +112,11 @@ export class WhatsAppBot {
           setTimeout(() => this.start(), delay);
         }
       } else if (connection === "open") {
-        this.log("info", "connected to WhatsApp");
+        const user = socket.user;
+        this.log(
+          "info",
+          `connected to WhatsApp as ${user?.name ?? "WhatsApp Bot"} (${user?.id ?? "unknown"})`,
+        );
         this.retryCount = 0; // reset on successful connection
       }
     });
@@ -103,31 +131,6 @@ export class WhatsAppBot {
         this.handleMessage(msg);
       }
     });
-  }
-
-  /** Probe bot identity (returns the authenticated JID). */
-  async probe(): Promise<{ id: string; name: string }> {
-    // Wait for connection
-    await new Promise<void>((resolve) => {
-      if (this.socket?.user) {
-        resolve();
-        return;
-      }
-      const check = setInterval(() => {
-        if (this.socket?.user) {
-          clearInterval(check);
-          resolve();
-        }
-      }, 500);
-      // Timeout after 2 minutes (QR scan may take time)
-      setTimeout(() => { clearInterval(check); resolve(); }, 120_000);
-    });
-
-    const user = this.socket?.user;
-    return {
-      id: user?.id ?? "unknown",
-      name: user?.name ?? "WhatsApp Bot",
-    };
   }
 
   /** Stop the bot. */
@@ -158,8 +161,11 @@ export class WhatsAppBot {
     const jid = key.remoteJid;
     if (!jid) return;
 
-    const text = msg.message?.conversation
+    const rawText = msg.message?.conversation
       ?? msg.message?.extendedTextMessage?.text
+      ?? msg.message?.imageMessage?.caption
+      ?? msg.message?.documentMessage?.caption
+      ?? msg.message?.videoMessage?.caption
       ?? "";
 
     const hasMedia = !!(
@@ -169,10 +175,46 @@ export class WhatsAppBot {
       || msg.message?.videoMessage
     );
 
-    if (!text && !hasMedia) return;
+    if (!rawText && !hasMedia) return;
+
+    const contextInfo = messageContextInfo(msg.message);
+    const botJids = [
+      this.socket?.user?.id,
+      this.socket?.user?.lid,
+      this.socket?.user?.phoneNumber,
+    ].filter((identity): identity is string => Boolean(identity));
+    if (!shouldHandleWhatsAppInbound({
+      isGroup: isJidGroup(jid) === true,
+      mentionedJids: contextInfo?.mentionedJid ?? [],
+      botJids,
+    })) {
+      this.log("debug", `group message ignored without bot mention chat=${jid}`);
+      return;
+    }
+    const text = normalizeWhatsAppPromptText({
+      text: rawText,
+      mentionedJids: contextInfo?.mentionedJid ?? [],
+      botJids,
+    });
 
     const chatId = jid;
+    const isGroup = isJidGroup(jid) === true;
+    const inboundContext = {
+      channelInstanceId: this.channelInstanceId,
+      actorId: this.actorId,
+      chatId,
+      senderId: key.participant ?? undefined,
+      platformMessageId: key.id ?? undefined,
+      scope: isGroup ? "group" : "dm",
+      addressedBy: isGroup ? "mention" : "dm",
+    } satisfies ChannelInboundContext;
+    const target = channelTargetFromInboundContext(inboundContext);
     this.log("debug", `message chat=${chatId} text=${text.slice(0, 80)}`);
+
+    if (text && isChannelStopCommand(text)) {
+      await cancelChannelPrompt(this.agent, { context: inboundContext });
+      return;
+    }
 
     const contentBlocks: ContentBlock[] = [];
 
@@ -192,23 +234,27 @@ export class WhatsAppBot {
 
     if (contentBlocks.length === 0) return;
 
-    if (text && this.streamHandler?.consumePendingText(chatId, text)) {
+    if (text && this.streamHandler?.consumePendingText(target, text)) {
       return;
     }
 
-    this.streamHandler?.onPromptSent(chatId);
+    this.streamHandler?.onPromptSent(target);
 
     try {
-      const response = await this.agent.prompt({
-        sessionId: chatId,
+      const response = await sendChannelPrompt(this.agent, {
+        context: inboundContext,
         prompt: contentBlocks,
       });
+      if (!response) {
+        await this.streamHandler?.onTurnEnd(target);
+        return;
+      }
       this.log("info", `prompt done chat=${chatId} stopReason=${response.stopReason}`);
-      await this.streamHandler?.onTurnEnd(chatId);
+      await this.streamHandler?.onTurnEnd(target);
     } catch (error: unknown) {
       const errMsg = extractErrorMessage(error);
       this.log("error", `prompt failed chat=${chatId}: ${errMsg}`);
-      await this.streamHandler?.onTurnError(chatId, errMsg);
+      await this.streamHandler?.onTurnError(target, errMsg);
     }
   }
 }

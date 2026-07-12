@@ -17,14 +17,10 @@ import { AgentStreamHandler } from "./agent-stream.js";
 runChannelPlugin({
   name: "vibearound-whatsapp",
   version: "0.1.0",
-  createBot: ({ agent, log, cacheDir }) =>
-    new WhatsAppBot(agent, log, cacheDir),
-  afterCreate: async (bot, log) => {
-    const botInfo = await bot.probe();
-    log("info", `bot identity: ${botInfo.name} (${botInfo.id})`);
-  },
+  createBot: ({ agent, log, cacheDir, channelInstanceId, actorId }) =>
+    new WhatsAppBot(agent, log, cacheDir, channelInstanceId, actorId),
   createRenderer: (bot, log, verbose) =>
     new AgentStreamHandler(bot, log, verbose),
-  // Heartbeat health check — Baileys socket authenticated (user set).
+  // Heartbeat health check — authenticated and receiving over Baileys WS.
   healthCheck: async (bot) => bot.isConnected(),
 });
