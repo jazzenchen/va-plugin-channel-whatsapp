@@ -3,13 +3,12 @@
  *
  * Handles:
  *   - WebSocket connection to WhatsApp via Baileys
- *   - QR code authentication (displayed in terminal)
+ *   - Pairing-code authentication managed through VibeAround Settings
  *   - Inbound message parsing → ACP prompt() to Host
  *   - Outbound message sending
  */
 
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion, isJidGroup, type proto } from "baileys";
-import qrcode from "qrcode-terminal";
 import type { Agent, ChannelInboundContext, ContentBlock } from "@vibearound/plugin-channel-sdk";
 import {
   cancelChannelPrompt,
@@ -23,6 +22,9 @@ import { normalizeWhatsAppPromptText, shouldHandleWhatsAppInbound } from "./inbo
 import { resolveAuthDir } from "./auth-cache.js";
 
 type LogFn = (level: string, msg: string) => void;
+
+export const WHATSAPP_PAIRING_REQUIRED_MESSAGE =
+  "WhatsApp is not authenticated. Open Settings and use phone-number pairing to connect.";
 
 function messageContextInfo(message: proto.IMessage | null | undefined): proto.IContextInfo | null | undefined {
   return message?.extendedTextMessage?.contextInfo
@@ -66,7 +68,7 @@ export class WhatsAppBot {
     this.streamHandler = handler;
   }
 
-  /** Start the WhatsApp connection. Displays QR code for first-time auth. */
+  /** Start the WhatsApp connection. Authentication is completed in Settings. */
   async start(): Promise<void> {
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
 
@@ -87,15 +89,11 @@ export class WhatsAppBot {
     });
     this.socket = socket;
 
-    // Handle QR code for authentication
     socket.ev.on("connection.update", (update) => {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
-        this.log("info", "scan QR code to authenticate with WhatsApp:");
-        qrcode.generate(qr, { small: true }, (code) => {
-          process.stderr.write(code + "\n");
-        });
+        this.log("info", WHATSAPP_PAIRING_REQUIRED_MESSAGE);
       }
 
       if (connection === "close") {
