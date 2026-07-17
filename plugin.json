@@ -17,6 +17,6 @@
     "interactiveCards": false,
     "editMessage": false,
     "media": true,
-    "auth": { "methods": ["qrcode_login"] }
+    "auth": { "methods": ["pairing_code"] }
   }
 }
