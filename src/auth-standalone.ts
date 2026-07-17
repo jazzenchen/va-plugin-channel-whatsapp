@@ -12,26 +12,9 @@
  *   shutdown → clean exit
  */
 
-import fs from "node:fs";
-import path from "node:path";
-import os from "node:os";
 import { createInterface } from "node:readline";
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } from "baileys";
-
-const authDir = path.join(os.homedir(), ".vibearound", ".cache", "whatsapp-auth");
-
-function clearAuthState(): void {
-  try {
-    if (fs.existsSync(authDir)) {
-      for (const file of fs.readdirSync(authDir)) {
-        fs.unlinkSync(path.join(authDir, file));
-      }
-      log("cleared stale auth state");
-    }
-  } catch (e) {
-    log(`failed to clear auth state: ${e}`);
-  }
-}
+import { resolveAuthDir } from "./auth-cache.js";
 
 function log(msg: string): void {
   process.stderr.write(`[whatsapp-auth] ${msg}\n`);
@@ -55,8 +38,7 @@ let socket: ReturnType<typeof makeWASocket> | null = null;
 let waitResolve: ((value: unknown) => void) | null = null;
 
 async function startAndPair(phoneNumber: string): Promise<{ pairingCode: string | null; alreadyConnected: boolean; error?: string }> {
-  clearAuthState();
-
+  const authDir = resolveAuthDir();
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
   let version: [number, number, number] | undefined;
@@ -105,7 +87,7 @@ async function startAndPair(phoneNumber: string): Promise<{ pairingCode: string 
   // Request pairing code
   try {
     const code = await socket.requestPairingCode(phoneNumber);
-    log(`pairing code generated: ${code}`);
+    log("pairing code generated");
     return { pairingCode: code, alreadyConnected: false };
   } catch (e) {
     log(`pairing code error: ${e}`);
@@ -143,7 +125,7 @@ rl.on("line", async (line) => {
         sendError(id, "phoneNumber is required (E.164 format without +)");
         break;
       }
-      log(`starting pairing for phone: ${phoneNumber}`);
+      log("starting pairing-code login");
       // Kill previous socket
       if (socket) { socket.end(undefined); socket = null; }
       connected = false;
@@ -153,18 +135,21 @@ rl.on("line", async (line) => {
         const result = await startAndPair(phoneNumber);
         if (result.alreadyConnected) {
           sendResponse(id, {
+            mode: "pairing_code",
             pairingCode: null,
             message: "WhatsApp is already authenticated.",
             alreadyConnected: true,
           });
         } else if (result.pairingCode) {
           sendResponse(id, {
+            mode: "pairing_code",
             pairingCode: result.pairingCode,
             message: "Enter this code in WhatsApp to link your device.",
             alreadyConnected: false,
           });
         } else {
           sendResponse(id, {
+            mode: "pairing_code",
             pairingCode: null,
             message: result.error || "Failed to generate pairing code.",
             alreadyConnected: false,
