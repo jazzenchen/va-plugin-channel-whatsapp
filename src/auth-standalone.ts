@@ -15,6 +15,7 @@
 import { createInterface } from "node:readline";
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion } from "baileys";
 import { resolveAuthDir } from "./auth-cache.js";
+import { AuthPersistenceGate } from "./auth-persistence.js";
 
 function log(msg: string): void {
   process.stderr.write(`[whatsapp-auth] ${msg}\n`);
@@ -35,11 +36,13 @@ function sendError(id: number | string, message: string): void {
 // State
 let connected = false;
 let socket: ReturnType<typeof makeWASocket> | null = null;
-let waitResolve: ((value: unknown) => void) | null = null;
+let persistenceGate: AuthPersistenceGate | null = null;
 
 async function startAndPair(phoneNumber: string): Promise<{ pairingCode: string | null; alreadyConnected: boolean; error?: string }> {
   const authDir = resolveAuthDir();
   const { state, saveCreds } = await useMultiFileAuthState(authDir);
+  const gate = new AuthPersistenceGate(Boolean(state.creds.registered));
+  persistenceGate = gate;
 
   let version: [number, number, number] | undefined;
   try {
@@ -56,23 +59,19 @@ async function startAndPair(phoneNumber: string): Promise<{ pairingCode: string 
     browser: Browsers.ubuntu("VibeAround"),
   });
 
-  socket.ev.on("creds.update", saveCreds);
+  socket.ev.on("creds.update", () => gate.trackWrite(saveCreds));
 
   socket.ev.on("connection.update", (update) => {
     if (update.connection === "open") {
       log("connected to WhatsApp!");
       connected = true;
-      if (waitResolve) {
-        waitResolve({ connected: true, message: "WhatsApp connected successfully." });
-        waitResolve = null;
-      }
+      gate.markConnected();
     }
     if (update.connection === "close") {
       const statusCode = (update.lastDisconnect?.error as any)?.output?.statusCode;
       log(`connection closed, statusCode=${statusCode}`);
-      if (statusCode === DisconnectReason.loggedOut && waitResolve) {
-        waitResolve({ connected: false, message: "WhatsApp session was logged out." });
-        waitResolve = null;
+      if (statusCode === DisconnectReason.loggedOut) {
+        gate.markFailed("WhatsApp session was logged out.");
       }
     }
   });
@@ -81,7 +80,10 @@ async function startAndPair(phoneNumber: string): Promise<{ pairingCode: string 
   await new Promise<void>((resolve) => setTimeout(resolve, 3000));
 
   if (connected) {
-    return { pairingCode: null, alreadyConnected: true };
+    const durable = await gate.waitUntilDurable();
+    return durable.connected
+      ? { pairingCode: null, alreadyConnected: true }
+      : { pairingCode: null, alreadyConnected: false, error: durable.message };
   }
 
   // Request pairing code
@@ -129,7 +131,7 @@ rl.on("line", async (line) => {
       // Kill previous socket
       if (socket) { socket.end(undefined); socket = null; }
       connected = false;
-      waitResolve = null;
+      persistenceGate = null;
 
       try {
         const result = await startAndPair(phoneNumber);
@@ -164,19 +166,19 @@ rl.on("line", async (line) => {
     case "login_pair_wait": {
       const timeoutMs = params?.timeoutMs ?? 120000;
 
-      if (connected) {
-        sendResponse(id, { connected: true, message: "WhatsApp connected successfully." });
+      const gate = persistenceGate;
+      if (!gate) {
+        sendError(id, "pairing session has not been started");
         break;
       }
 
       const result = await Promise.race([
-        new Promise((resolve) => { waitResolve = resolve; }),
+        gate.waitUntilDurable(),
         new Promise((resolve) =>
           setTimeout(() => resolve({ connected: false, message: "Pairing timed out. Try again." }), timeoutMs)
         ),
       ]);
 
-      waitResolve = null;
       sendResponse(id, result);
       break;
     }
