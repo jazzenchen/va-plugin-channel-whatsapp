@@ -26,6 +26,16 @@ type LogFn = (level: string, msg: string) => void;
 export const WHATSAPP_PAIRING_REQUIRED_MESSAGE =
   "WhatsApp is not authenticated. Open Settings and use phone-number pairing to connect.";
 
+export function classifyWhatsAppError(error: unknown): "cancelled" | "timeout" | "runtime" {
+  const name = error instanceof Error ? error.name.toLowerCase() : "";
+  const message = error instanceof Error ? error.message.toLowerCase() : "";
+  if (name === "aborterror") return "cancelled";
+  if (name === "timeouterror" || message.includes("timeout") || message.includes("timed out")) {
+    return "timeout";
+  }
+  return "runtime";
+}
+
 function messageContextInfo(message: proto.IMessage | null | undefined): proto.IContextInfo | null | undefined {
   return message?.extendedTextMessage?.contextInfo
     ?? message?.imageMessage?.contextInfo
@@ -99,7 +109,7 @@ export class WhatsAppBot {
       if (connection === "close") {
         const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-        this.log("info", `connection closed, statusCode=${statusCode} reconnect=${shouldReconnect}`);
+        this.log("info", `connection closed category=${shouldReconnect ? "transient" : "logged_out"}`);
         if (shouldReconnect && !this.stopped) {
           // Exponential backoff: 1s, 2s, 4s, 8s, max 30s
           const delay = Math.min(1000 * Math.pow(2, this.retryCount), 30_000);
@@ -108,11 +118,7 @@ export class WhatsAppBot {
           setTimeout(() => this.start(), delay);
         }
       } else if (connection === "open") {
-        const user = socket.user;
-        this.log(
-          "info",
-          `connected to WhatsApp as ${user?.name ?? "WhatsApp Bot"} (${user?.id ?? "unknown"})`,
-        );
+        this.log("info", "connected to WhatsApp");
         this.retryCount = 0; // reset on successful connection
       }
     });
@@ -184,7 +190,7 @@ export class WhatsAppBot {
       mentionedJids: contextInfo?.mentionedJid ?? [],
       botJids,
     })) {
-      this.log("debug", `group message ignored without bot mention chat=${jid}`);
+      this.log("debug", "group message ignored without bot mention");
       return;
     }
     const text = normalizeWhatsAppPromptText({
@@ -205,7 +211,10 @@ export class WhatsAppBot {
       addressedBy: isGroup ? "mention" : "dm",
     } satisfies ChannelInboundContext;
     const target = channelTargetFromInboundContext(inboundContext);
-    this.log("debug", `message chat=${chatId} text=${text.slice(0, 80)}`);
+    this.log(
+      "debug",
+      `message received scope=${isGroup ? "group" : "dm"} text=${Boolean(text)} media=${hasMedia}`,
+    );
 
     if (text && isChannelStopCommand(text)) {
       await cancelChannelPrompt(this.agent, { context: inboundContext });
@@ -245,11 +254,11 @@ export class WhatsAppBot {
         await this.streamHandler?.onTurnEnd(target);
         return;
       }
-      this.log("info", `prompt done chat=${chatId} stopReason=${response.stopReason}`);
+      this.log("info", "prompt completed");
       await this.streamHandler?.onTurnEnd(target);
     } catch (error: unknown) {
       const errMsg = extractErrorMessage(error);
-      this.log("error", `prompt failed chat=${chatId}: ${errMsg}`);
+      this.log("error", `prompt failed category=${classifyWhatsAppError(error)}`);
       await this.streamHandler?.onTurnError(target, errMsg);
     }
   }

@@ -92,7 +92,7 @@ async function startAndPair(phoneNumber: string): Promise<{ pairingCode: string 
     log("pairing code generated");
     return { pairingCode: code, alreadyConnected: false };
   } catch (e) {
-    log(`pairing code error: ${e}`);
+    log("pairing code generation failed");
     return { pairingCode: null, alreadyConnected: false, error: String(e) };
   }
 }
