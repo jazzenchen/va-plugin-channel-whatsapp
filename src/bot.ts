@@ -8,7 +8,6 @@
  *   - Outbound message sending
  */
 
-import path from "node:path";
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion, isJidGroup, type proto } from "baileys";
 import qrcode from "qrcode-terminal";
 import type { Agent, ChannelInboundContext, ContentBlock } from "@vibearound/plugin-channel-sdk";
@@ -21,6 +20,7 @@ import {
 } from "@vibearound/plugin-channel-sdk";
 import type { AgentStreamHandler } from "./agent-stream.js";
 import { normalizeWhatsAppPromptText, shouldHandleWhatsAppInbound } from "./inbound-policy.js";
+import { resolveAuthDir } from "./auth-cache.js";
 
 type LogFn = (level: string, msg: string) => void;
 
@@ -36,7 +36,6 @@ export class WhatsAppBot {
   private socket: ReturnType<typeof makeWASocket> | null = null;
   private agent: Agent;
   private log: LogFn;
-  private cacheDir: string;
   private authDir: string;
   private channelInstanceId: string;
   private actorId: string;
@@ -52,14 +51,13 @@ export class WhatsAppBot {
   constructor(
     agent: Agent,
     log: LogFn,
-    cacheDir: string,
+    _cacheDir: string,
     channelInstanceId: string,
     actorId: string,
   ) {
     this.agent = agent;
     this.log = log;
-    this.cacheDir = cacheDir;
-    this.authDir = path.join(cacheDir, "whatsapp-auth");
+    this.authDir = resolveAuthDir();
     this.channelInstanceId = channelInstanceId;
     this.actorId = actorId;
   }
