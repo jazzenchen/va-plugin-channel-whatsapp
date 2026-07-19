@@ -130,7 +130,9 @@ export class WhatsAppBot {
     socket.ev.on("messages.upsert", ({ messages, type }) => {
       if (type !== "notify") return;
       for (const msg of messages) {
-        this.handleMessage(msg);
+        void this.handleMessage(msg).catch((error: unknown) => {
+          this.log("error", `message handling failed category=${classifyWhatsAppError(error)}`);
+        });
       }
     });
   }
