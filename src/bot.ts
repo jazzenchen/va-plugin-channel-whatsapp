@@ -54,7 +54,6 @@ export class WhatsAppBot {
   private streamHandler: AgentStreamHandler | null = null;
   private stopped = false;
   private retryCount = 0;
-  private startPromise: Promise<void> | null = null;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Heartbeat check — authenticated and the inbound WebSocket is open. */
@@ -83,18 +82,6 @@ export class WhatsAppBot {
   /** Start the WhatsApp connection. Authentication is completed in Settings. */
   async start(): Promise<void> {
     if (this.stopped || this.socket) return;
-    if (this.startPromise) return this.startPromise;
-
-    const startPromise = this.connect();
-    this.startPromise = startPromise;
-    try {
-      await startPromise;
-    } finally {
-      this.startPromise = null;
-    }
-  }
-
-  private async connect(): Promise<void> {
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
 
     // Fetch latest WA Web version to avoid "cannot link device" errors

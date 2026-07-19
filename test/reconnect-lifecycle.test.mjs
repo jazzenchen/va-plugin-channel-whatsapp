@@ -20,7 +20,7 @@ test("repeated reconnect requests share one timer", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const bot = createBot();
   let starts = 0;
-  bot.connect = async () => {
+  bot.start = async () => {
     starts++;
   };
 
@@ -39,7 +39,7 @@ test("stop clears reconnect and detaches the current socket before ending it", a
   const bot = createBot();
   let starts = 0;
   let ended = false;
-  bot.connect = async () => {
+  bot.start = async () => {
     starts++;
   };
   bot.scheduleReconnect();
@@ -59,37 +59,12 @@ test("stop clears reconnect and detaches the current socket before ending it", a
   assert.equal(bot.reconnectTimer, null);
 });
 
-test("concurrent and active starts create only one socket", async () => {
-  const bot = createBot();
-  let creations = 0;
-  let releaseConnect;
-  const connectGate = new Promise((resolve) => {
-    releaseConnect = resolve;
-  });
-  bot.connect = async () => {
-    creations++;
-    await connectGate;
-    bot.socket = { end() {} };
-  };
-
-  const first = bot.start();
-  const second = bot.start();
-  assert.equal(creations, 1);
-
-  releaseConnect();
-  await Promise.all([first, second]);
-  await bot.start();
-
-  assert.equal(creations, 1);
-  bot.stop();
-});
-
 test("failed reconnect attempts are logged and rescheduled", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   const logs = [];
   const bot = createBot((level, message) => logs.push({ level, message }));
   let attempts = 0;
-  bot.connect = async () => {
+  bot.start = async () => {
     attempts++;
     throw new Error("connect failed");
   };
