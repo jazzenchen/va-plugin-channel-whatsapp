@@ -108,17 +108,34 @@ export class WhatsAppBot {
     });
 
     // Save credentials on update
-    socket.ev.on("creds.update", saveCreds);
+    socket.ev.on("creds.update", () => {
+      return this.handleCredentialsUpdate(socket, saveCreds);
+    });
 
     // Handle incoming messages
-    socket.ev.on("messages.upsert", ({ messages, type }) => {
-      if (type !== "notify") return;
-      for (const msg of messages) {
-        void this.handleMessage(msg).catch((error: unknown) => {
-          this.log("error", `message handling failed category=${classifyWhatsAppError(error)}`);
-        });
-      }
+    socket.ev.on("messages.upsert", (event) => {
+      this.handleMessagesUpsert(socket, event);
     });
+  }
+
+  private handleCredentialsUpdate(
+    socket: ReturnType<typeof makeWASocket>,
+    saveCreds: () => Promise<void>,
+  ): Promise<void> | undefined {
+    if (this.socket !== socket) return;
+    return saveCreds();
+  }
+
+  private handleMessagesUpsert(
+    socket: ReturnType<typeof makeWASocket>,
+    { messages, type }: BaileysEventMap["messages.upsert"],
+  ): void {
+    if (this.socket !== socket || type !== "notify") return;
+    for (const msg of messages) {
+      void this.handleMessage(msg).catch((error: unknown) => {
+        this.log("error", `message handling failed category=${classifyWhatsAppError(error)}`);
+      });
+    }
   }
 
   private handleConnectionUpdate(

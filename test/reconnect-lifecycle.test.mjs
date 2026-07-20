@@ -101,3 +101,38 @@ test("a stale socket close cannot replace the current connection", () => {
   assert.equal(bot.retryCount, 0);
   bot.stop();
 });
+
+test("a stale socket credential update cannot persist credentials", async () => {
+  const bot = createBot();
+  const staleSocket = { end() {} };
+  const currentSocket = { end() {} };
+  let saves = 0;
+  bot.socket = currentSocket;
+
+  await bot.handleCredentialsUpdate(staleSocket, async () => {
+    saves++;
+  });
+
+  assert.equal(saves, 0);
+  bot.stop();
+});
+
+test("a stale socket message update cannot deliver messages", async () => {
+  const bot = createBot();
+  const staleSocket = { end() {} };
+  const currentSocket = { end() {} };
+  let handled = 0;
+  bot.socket = currentSocket;
+  bot.handleMessage = async () => {
+    handled++;
+  };
+
+  bot.handleMessagesUpsert(staleSocket, {
+    type: "notify",
+    messages: [{ key: { remoteJid: "user@s.whatsapp.net" } }],
+  });
+  await flushAsyncWork();
+
+  assert.equal(handled, 0);
+  bot.stop();
+});
