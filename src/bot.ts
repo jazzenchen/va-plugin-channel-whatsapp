@@ -8,7 +8,7 @@
  *   - Outbound message sending
  */
 
-import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion, isJidGroup, type proto } from "baileys";
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion, isJidGroup, type BaileysEventMap, type proto } from "baileys";
 import type { Agent, ChannelInboundContext, ContentBlock } from "@vibearound/plugin-channel-sdk";
 import {
   cancelChannelPrompt,
@@ -54,6 +54,7 @@ export class WhatsAppBot {
   private streamHandler: AgentStreamHandler | null = null;
   private stopped = false;
   private retryCount = 0;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   /** Heartbeat check — authenticated and the inbound WebSocket is open. */
   public isConnected(): boolean {
@@ -80,6 +81,7 @@ export class WhatsAppBot {
 
   /** Start the WhatsApp connection. Authentication is completed in Settings. */
   async start(): Promise<void> {
+    if (this.stopped || this.socket) return;
     const { state, saveCreds } = await useMultiFileAuthState(this.authDir);
 
     // Fetch latest WA Web version to avoid "cannot link device" errors
@@ -92,6 +94,8 @@ export class WhatsAppBot {
       this.log("warn", "failed to fetch latest version, using default");
     }
 
+    if (this.stopped) return;
+
     const socket = makeWASocket({
       auth: state,
       ...(version ? { version } : {}),
@@ -100,45 +104,91 @@ export class WhatsAppBot {
     this.socket = socket;
 
     socket.ev.on("connection.update", (update) => {
-      const { connection, lastDisconnect, qr } = update;
-
-      if (qr) {
-        this.log("info", WHATSAPP_PAIRING_REQUIRED_MESSAGE);
-      }
-
-      if (connection === "close") {
-        const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
-        this.log("info", `connection closed category=${shouldReconnect ? "transient" : "logged_out"}`);
-        if (shouldReconnect && !this.stopped) {
-          // Exponential backoff: 1s, 2s, 4s, 8s, max 30s
-          const delay = Math.min(1000 * Math.pow(2, this.retryCount), 30_000);
-          this.retryCount++;
-          this.log("info", `reconnecting in ${delay}ms (attempt ${this.retryCount})...`);
-          setTimeout(() => this.start(), delay);
-        }
-      } else if (connection === "open") {
-        this.log("info", "connected to WhatsApp");
-        this.retryCount = 0; // reset on successful connection
-      }
+      this.handleConnectionUpdate(socket, update);
     });
 
     // Save credentials on update
-    socket.ev.on("creds.update", saveCreds);
+    socket.ev.on("creds.update", () => {
+      return this.handleCredentialsUpdate(socket, saveCreds);
+    });
 
     // Handle incoming messages
-    socket.ev.on("messages.upsert", ({ messages, type }) => {
-      if (type !== "notify") return;
-      for (const msg of messages) {
-        this.handleMessage(msg);
-      }
+    socket.ev.on("messages.upsert", (event) => {
+      this.handleMessagesUpsert(socket, event);
     });
+  }
+
+  private handleCredentialsUpdate(
+    socket: ReturnType<typeof makeWASocket>,
+    saveCreds: () => Promise<void>,
+  ): Promise<void> | undefined {
+    if (this.socket !== socket) return;
+    return saveCreds();
+  }
+
+  private handleMessagesUpsert(
+    socket: ReturnType<typeof makeWASocket>,
+    { messages, type }: BaileysEventMap["messages.upsert"],
+  ): void {
+    if (this.socket !== socket || type !== "notify") return;
+    for (const msg of messages) {
+      void this.handleMessage(msg).catch((error: unknown) => {
+        this.log("error", `message handling failed category=${classifyWhatsAppError(error)}`);
+      });
+    }
+  }
+
+  private handleConnectionUpdate(
+    socket: ReturnType<typeof makeWASocket>,
+    update: BaileysEventMap["connection.update"],
+  ): void {
+    if (this.socket !== socket) return;
+
+    const { connection, lastDisconnect, qr } = update;
+    if (qr) {
+      this.log("info", WHATSAPP_PAIRING_REQUIRED_MESSAGE);
+    }
+
+    if (connection === "close") {
+      this.socket = null;
+      const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      this.log("info", `connection closed category=${shouldReconnect ? "transient" : "logged_out"}`);
+      if (shouldReconnect) {
+        this.scheduleReconnect();
+      }
+    } else if (connection === "open") {
+      this.log("info", "connected to WhatsApp");
+      this.retryCount = 0; // reset on successful connection
+    }
+  }
+
+  private scheduleReconnect(): void {
+    if (this.stopped || this.reconnectTimer) return;
+
+    // Exponential backoff: 1s, 2s, 4s, 8s, max 30s
+    const delay = Math.min(1000 * Math.pow(2, this.retryCount), 30_000);
+    this.retryCount++;
+    this.log("info", `reconnecting in ${delay}ms (attempt ${this.retryCount})...`);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      void this.start().catch((error: unknown) => {
+        this.log("error", `reconnect failed category=${classifyWhatsAppError(error)}`);
+        this.scheduleReconnect();
+      });
+    }, delay);
   }
 
   /** Stop the bot. */
   stop(): void {
     this.stopped = true;
-    this.socket?.end(undefined);
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    const socket = this.socket;
+    this.socket = null;
+    socket?.end(undefined);
   }
 
   /** Send a text message. */
