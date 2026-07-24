@@ -9,7 +9,7 @@
  */
 
 import { makeWASocket, useMultiFileAuthState, DisconnectReason, Browsers, fetchLatestBaileysVersion, isJidGroup, type BaileysEventMap, type proto } from "baileys";
-import type { Agent, ChannelInboundContext, ContentBlock } from "@vibearound/plugin-channel-sdk";
+import type { Agent, ChannelInboundContext, ContentBlock, OutboundFile } from "@vibearound/plugin-channel-sdk";
 import {
   cancelChannelPrompt,
   channelTargetFromInboundContext,
@@ -195,6 +195,15 @@ export class WhatsAppBot {
   async sendMessage(jid: string, text: string): Promise<void> {
     if (!this.socket) throw new Error("Socket not connected");
     await this.socket.sendMessage(jid, { text });
+  }
+
+  async sendFile(jid: string, file: OutboundFile): Promise<void> {
+    if (!this.socket) throw new Error("Socket not connected");
+    await this.socket.sendMessage(jid, {
+      document: { url: file.path },
+      fileName: file.name,
+      mimetype: file.mimeType ?? "application/octet-stream",
+    });
   }
 
   // --------------------------------------------------------------------------

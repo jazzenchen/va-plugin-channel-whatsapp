@@ -9,14 +9,20 @@
  * Authentication via QR code scan on first run; session persisted to disk.
  */
 
+import { createRequire } from "node:module";
+
 import { runChannelPlugin } from "@vibearound/plugin-channel-sdk";
 
 import { WhatsAppBot } from "./bot.js";
 import { AgentStreamHandler } from "./agent-stream.js";
 
+const packageVersion = (
+  createRequire(import.meta.url)("../package.json") as { version: string }
+).version;
+
 runChannelPlugin({
   name: "vibearound-whatsapp",
-  version: "0.6.6",
+  version: packageVersion,
   createBot: ({ agent, log, cacheDir, channelInstanceId, actorId }) =>
     new WhatsAppBot(agent, log, cacheDir, channelInstanceId, actorId),
   createRenderer: (bot, _log, verbose) =>

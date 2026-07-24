@@ -26,3 +26,20 @@ test("direct WhatsApp block delivery exposes send failures", async () => {
     /direct delivery failed/,
   );
 });
+
+test("WhatsApp renderer delegates files to the active chat", async () => {
+  const sent = [];
+  const renderer = new AgentStreamHandler({
+    async sendFile(...args) {
+      sent.push(args);
+    },
+  });
+  const file = {
+    path: "/workspace/report.pdf",
+    name: "report.pdf",
+  };
+
+  await renderer.sendFile(target, file);
+
+  assert.deepEqual(sent, [["user@s.whatsapp.net", file]]);
+});
